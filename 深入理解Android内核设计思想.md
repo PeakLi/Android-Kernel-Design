@@ -139,4 +139,144 @@
 
 ### 编译流程
 	Step1.执行envsetup脚本
+	$ source ./build/envsetup.sh
+
+	Step2. 选择编译目标
+	$ lunch BUILD_BUILDTYPE
+
+	Step3. 执行编译命令
+	$ make [-jN] N 的值取决于开发机器的 CPU数、每颗 CPU 的核心数以及每个核心的线程数。
+
+	小技巧【Build Number标签】
+	$ export BUILD_NUMBER=${USER}-'date +%Y%m%d-%H%M%S'
+
+	编译SDK：
+	Mac OS和Linux
+	1.下载源码，和前面已经讲过的源码下载过程没有任何区别。
+	2.执行 envsetup.sh
+	3.选择 SDK 对应的产品
+	$ lunch sdk-eng
+	$ make sdk
+
+### 定制产品的编译与烧录
+#### 定制新产品
+	Step 1. 和图 2-6 所列的各厂商一样，我们也最好先在 device 目录下添加一个以公司命名的文件夹。
+	device：
+	samsung、 moto、 google 等厂商名录
+
+![image](pic/device.png)
+
+	讲解脚本文件
+	Step 2. vendorsetup.sh
+
+* 虽然我们已经为新产品创建了目录，但 Android 系统并不知道它的存在——所以需要主动告知
+	Android 系统新增了一个“家庭成员”。以三星 toro 为例，为了让它能被正确添加到编译系统中，首
+	先就要在其目录下新建一个 vendorsetup.sh 脚本。这个脚本通常只需要一个语句。具体范例如下：
+	add\_lunch\_combo full\_toro-userdebug
+	大家应该还记得前一小节编译原生态系统的第一步是执行 envsetup.sh，函数 add_lunch_combo
+	就是在这个文件中定义的。此函数的作用是将其参数所描述的产品（如 full\_toro-userdebug）添加
+	到系统相关变量中——后续 lunch 提供的选单即基于这些变量产生的。那么， vendorsetup.sh 在什么时候会被调用呢？
+	答案也是 envsetup.sh。这个脚本的大部分内容是对各种函数进行定义与实现，末尾则会通过
+	一个 for 循环来扫描工程中所有可用的 vendorsetup.sh，并执行它们。具体源码如下：
+#
+	# Execute the contents of any vendorsetup.sh files we can find.
+	for f in 'test -d device && find device -maxdepth 4 -name 'vendorsetup.sh' 2> /dev/null'
+	\
+	'test -d vendor && find vendor -maxdepth 4 -name 'vendorsetup.sh' 2> /dev/null'
+	do
+	echo "including $f"
+	. $f
+	Done
+	unset f
+	可见，默认情况下编译系统会扫描如下路径来查找 vendorsetup.sh：
+	/vendor/
+	/device/
+	注： vendor 这个目录在 4.3 版本的 Android 工程中已经不存在了，建议开发者将产品目录统
+	一放在 device 中。
+
+#
+	Step 3. 添加 AndroidProducts.mk。
+* 消费者在货架上选择（lunch）了某样“商品”后，工作人
+员的后续操作（如结账、售后等）就完全基于这个特定商品来展开。编译系统会先在商品所在目
+录下寻找 AndroidProducts.mk 文件，这里记录着针对该款商品的一些具体属性。不过，通常我们
+只在这个文件中做一个“转向”。如：
+#
+	/*device/samsung/toro/AndroidProducts.mk*/
+	PRODUCT_MAKEFILES := \
+	$(LOCAL_DIR)/aosp_toro.mk \
+	$(LOCAL_DIR)/full_toro.mk
+* 因为 AndroidProducts.mk 对于每款产品都是通用的，不利于维护管理，所以可另外新增一个
+或者多个以该产品命名的 makefile（如 full\_toro.mk 和 aosp\_toro.mk），再让前者通过 PRODUCT_
+MAKEFILES“指向”它们。
+
+#
+	Step4. 实现上一步所提到的某产品专用的 makefile 文件
+#
+	Step 5. 添加 BoardConfig.mk 文件
+*	这个文件用于填写目标架构、硬件设备属性、编译器的条
+件标志、分区布局、 boot 地址、 ramdisk 大小等一系列参数（参见下一小节对系统映像文件的讲解）。
+下面是一个范例（因为 toro 中的 BoardConfig 主要引用了 tuna 的 BoardConfig 实现，所以我们直
+接讲解后者的实现）：
+
+#
+	Step 6. 添加 Android.mk。这是 Android 系统下编译某个模块的标准 makefile
+#
+	Step7. 完成前面 6 个步骤后，我们就成功地将一款新设备定制到编译系统中了。
+* /system/build.prop 这个文件的生成过程也是由编译系统控制的。具体处理过程在/build/core/Makefile 中，它主要由以下几个部分组成：
+#
+	/build/tools/buildinfo.sh
+	这个脚本用于向 build.prop 中输出各种<key> <value>组合，实现方式也很简单。下面是其中的两行节选：
+	echo "ro.build.id=$BUILD_ID"
+	echo "ro.build.display.id=$BUILD_DISPLAY_ID"
+	y TARGET_DEVICE_DIR 目录下的 system.prop
+	y ADDITIONAL_BUILD_PROPERTIES
+	y /build/tools/post_process_props.py
+
+
+### 2.3.2 Linux 内核编译
+	Step1. 首先通过以下命令来获取到 git log：
+	$ git clone https://android.googlesource.com/device/ti/panda
+	$ cd panda
+	$git log --max-count=1 kernel
+#
+	Step2. Google 针对 Android 系统提供了以下可用的内核版本：
+![image](pic/Panda.png)
+
+	Step3. 除了 Linux 内核，我们还需要下载 prebuilt。具体命令如下：
+	$ git clone https://android.googlesource.com/platform/prebuilt
+	$ export PATH=$(pwd)/prebuilt/linux-x86/toolchain/arm-eabi-4.4.3/bin:$PATH
+#
+	Step4. 完成以上步骤后，就可以进行 Panda 内核的编译了：
+	$ export ARCH=arm
+	$ export SUBARCH=arm
+	$ export CROSS_COMPILE=arm-eabi-
+	$ cd omap
+	$ git checkout <第一步获取到的值>
+	$ make panda_defconfig
+	$ make
+
+### 2.3.3 烧录/升级系统
+	（1） SD 卡工厂烧录方式
+	（2） USB 方式
+	（3）专用的烧写工具
+	（4）网络连接方式
+	（5）设备 Bootloader+fastboot 的模式
+	（6） Recovery 模式
 	
+## 2.4 Android Multilib Build
+
+## 2.5 Android系统映像文件
+![](pic/image.png)
+![](pic/boot-ramdisk-system.png)
+## 2.6 ODEx
+* ODEX 是 Android 旧系统的一个优化机制。对于很多开发人员来说， ODEX 可以说是既熟悉
+又陌生。熟悉的原因在于目前很多手机系统， 或者 APK 中的文件都从以前的格式变成了如图 2-21
+和图 2-22 所示的样子。
+
+![](pic/odex.png)
+
+* 本书的 Android 应用程序编译和打包章节将做更为详细介绍。现在大家只要知道 APK 中有哪
+些组成元素就可以了。当应用程序启动时，系统需要提取图 2-23 中的 dex（如果之前没有做过
+ODEX 优化的话，或者/data/dalvik-cache 中没有对应的 ODEX 缓存），然后才能执行加载动作。而
+ODEX 则是预先将 DEX 提取出来，并针对当前具体设备做了优化工作后的产物，这样做除了能
+提高加载速度外，还有如下几个优势：
